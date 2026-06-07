@@ -49,11 +49,11 @@ bool digitalInputs[4];
 uint16_t analogInputs[2];
 
 //------------------------------------------------
-// GAMEPAD STATE
+// GAMEPAD STATE (6 BUTTONS MAX FOR MASTER)
 //------------------------------------------------
 
 uint32_t buttons=0;
-int16_t axis[8];
+int16_t axis[3];  // Only 3 axes per slave
 
 //------------------------------------------------
 // INPUT MAP
@@ -98,7 +98,7 @@ typedef struct
 {
   char name[32];
   uint32_t buttons;
-  int16_t axis[8];
+  int16_t axis[3];  // Only 3 axes
 
 } GamepadPacket;
 
@@ -242,7 +242,8 @@ void applyMapping()
 
     if(m.type==1)
     {
-      axis[m.target]=processAnalog(m.source,analogInputs[m.source]);
+      if(m.target < 3)  // Only 3 axes now
+        axis[m.target]=processAnalog(m.source,analogInputs[m.source]);
     }
   }
 }
@@ -255,7 +256,7 @@ void updateBLE()
 {
   if(!bleGamepad.isConnected()) return;
 
-  for(int i=0;i<32;i++)
+  for(int i=0;i<6;i++)  // Only 6 buttons max for slave
   {
     if(buttons&(1<<i))
       bleGamepad.press(i+1);
@@ -264,8 +265,8 @@ void updateBLE()
   }
 
   bleGamepad.setAxes(
-    axis[0],axis[1],axis[2],axis[3],
-    axis[4],axis[5],axis[6],axis[7]
+    axis[0],axis[1],axis[2],0,
+    0,0,0,0
   );
 }
 
@@ -361,13 +362,8 @@ int axisNameToIndex(String s)
   if(s=="X") return 0;
   if(s=="Y") return 1;
   if(s=="Z") return 2;
-  if(s=="RX") return 3;
-  if(s=="RY") return 4;
-  if(s=="RZ") return 5;
-  if(s=="SL1") return 6;
-  if(s=="SL2") return 7;
 
-  return -1;
+  return -1;  // Only 3 axes per slave
 }
 
 void serialMapCommand(String cmd)
@@ -388,12 +384,15 @@ void serialMapCommand(String cmd)
     int src=input.substring(1).toInt();
     int btn=target.substring(1).toInt();
 
-    mapTable[src].type=0;
-    mapTable[src].source=src;
-    mapTable[src].target=btn;
-    mapTable[src].enabled=true;
+    if(src < 4 && btn < 6)  // Max 6 buttons per slave
+    {
+      mapTable[src].type=0;
+      mapTable[src].source=src;
+      mapTable[src].target=btn;
+      mapTable[src].enabled=true;
 
-    Serial.println("DIGITAL MAP UPDATED");
+      Serial.println("DIGITAL MAP UPDATED");
+    }
   }
 
   if(input[0]=='A')
@@ -401,7 +400,7 @@ void serialMapCommand(String cmd)
     int src=input.substring(1).toInt();
     int axisIndex=axisNameToIndex(target);
 
-    if(axisIndex>=0)
+    if(axisIndex>=0 && src<2)
     {
       int mapIndex=4+src;
 
