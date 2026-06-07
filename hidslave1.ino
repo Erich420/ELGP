@@ -13,10 +13,10 @@
 // GPIO PINS
 //================================================
 
-#define D0 21
-#define D1 14
-#define D2 19
-#define D3 18
+#define D0 19
+#define D1 18
+#define D2 17
+#define D3 16
 
 #define A0 36
 #define A1 39
