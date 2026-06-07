@@ -302,8 +302,8 @@ void sendBleGamepad()
     }
 
     // Map analog sticks
-    bleGamepad.setLeftStick(axis[0], axis[1]);
-    bleGamepad.setRightStick(axis[2], 0);
+    bleGamepad.setLeftThumb(axis[0], axis[1]);
+    bleGamepad.setRightThumb(axis[2], 0);
 
     bleGamepad.sendReport();
 }
@@ -384,11 +384,10 @@ void initESPNow()
 void initBleGamepad()
 {
     BleGamepadConfiguration bleGamepadConfig;
-    bleGamepadConfig.setControllerName("ELGP Gamepad");
+    bleGamepadConfig.setControllerType(CONTROLLER_TYPE_GAMEPAD);
     bleGamepadConfig.setButtonCount(4);
     bleGamepadConfig.setIncludeStart(true);
     bleGamepadConfig.setIncludeSelect(true);
-    bleGamepadConfig.setIncludeAnalogSticks(true);
 
     bleGamepad.begin(&bleGamepadConfig);
     Serial.println("BLE Gamepad initialized");
