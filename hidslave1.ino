@@ -29,7 +29,7 @@
 #define AXIS_Z_BTN 26  // Z axis button (Right Trigger)
 
 // Zero button
-#define ZERO_BTN 19    // Zero steering button
+#define ZERO_BTN 23    // Zero steering button
 
 //================================================
 // OPERATING MODES
