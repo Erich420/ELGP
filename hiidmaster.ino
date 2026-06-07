@@ -13,8 +13,8 @@
 // MASTER MODE DETECTION PINS
 //================================================
 
-#define BTN1 4
-#define BTN2 5
+#define BTN1 1
+#define BTN2 2
 
 //================================================
 // KEYPAD CONFIGURATION
@@ -23,8 +23,8 @@
 #define KEYPAD_ROWS 4
 #define KEYPAD_COLS 3
 
-uint8_t rowPins[KEYPAD_ROWS] = {6, 7, 8, 9};
-uint8_t colPins[KEYPAD_COLS] = {10, 11, 12};
+uint8_t rowPins[KEYPAD_ROWS] = {5, 17, 16, 7};
+uint8_t colPins[KEYPAD_COLS] = {6, 4, 15};
 
 uint8_t keymap[KEYPAD_ROWS][KEYPAD_COLS] =
 {
