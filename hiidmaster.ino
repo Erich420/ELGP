@@ -59,6 +59,7 @@ DeviceMode mode;
 //================================================
 
 uint32_t buttons = 0;
+uint32_t keypadButtons = 0;  // Track keypad buttons separately
 int16_t axis[6];
 
 //================================================
@@ -170,11 +171,11 @@ void readKeypad()
 
             if(keystate == PRESSED)
             {
-                buttons |= (1 << buttonIndex);
+                keypadButtons |= (1 << buttonIndex);
             }
             else if(keystate == RELEASED)
             {
-                buttons &= ~(1 << buttonIndex);
+                keypadButtons &= ~(1 << buttonIndex);
             }
         }
     }
@@ -310,7 +311,7 @@ void setup()
 
 void loop()
 {
-    buttons = 0;
+    buttons = keypadButtons;  // Start with keypad buttons
     memset(axis, 0, sizeof(axis));
 
     readKeypad();
