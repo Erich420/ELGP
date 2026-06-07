@@ -1,13 +1,13 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_now.h>
-#include <Keypad.h>
 
 #include "USB.h"
 #include "USBHID.h"
 #include "USBHIDGamepad.h"
 
 #include <BleGamepad.h>
+#include <Keypad.h>
 
 //================================================
 // MASTER MODE DETECTION PINS
@@ -23,15 +23,15 @@
 #define KEYPAD_ROWS 4
 #define KEYPAD_COLS 3
 
-uint8_t rowPins[KEYPAD_ROWS] = {6, 7, 8, 9};     // Adjust to suit
-uint8_t colPins[KEYPAD_COLS] = {10, 11, 12};     // Adjust to suit
+uint8_t rowPins[KEYPAD_ROWS] = {6, 7, 8, 9};
+uint8_t colPins[KEYPAD_COLS] = {10, 11, 12};
 
 uint8_t keymap[KEYPAD_ROWS][KEYPAD_COLS] =
 {
-    {0, 1, 2},      // Buttons 1, 2, 3
-    {3, 4, 5},      // Buttons 4, 5, 6
-    {6, 7, 8},      // Buttons 7, 8, 9
-    {9, 10, 11}     // Buttons 10, 11, 12
+    {0, 1, 2},
+    {3, 4, 5},
+    {6, 7, 8},
+    {9, 10, 11}
 };
 
 Keypad customKeypad = Keypad(makeKeymap(keymap), rowPins, colPins, KEYPAD_ROWS, KEYPAD_COLS);
@@ -40,8 +40,6 @@ Keypad customKeypad = Keypad(makeKeymap(keymap), rowPins, colPins, KEYPAD_ROWS, 
 // SYSTEM LIMITS
 //================================================
 
-#define MAX_BUTTONS 24              // 12 from keypad + 6 from slave1 + 6 from slave2
-#define MAX_AXES 6                  // 3 from each slave
 #define MAX_SLAVES 2
 
 //================================================
@@ -61,14 +59,14 @@ DeviceMode mode;
 //================================================
 
 uint32_t buttons = 0;
-int16_t axis[MAX_AXES];
+int16_t axis[6];
 
 //================================================
 // USB + BLE DEVICES
 //================================================
 
 USBHIDGamepad usbGamepad;
-BleGamepad bleGamepad("ESP32_Modular_Gamepad","ESP32",100);
+BleGamepad bleGamepad("ESP32_Gamepad", "ESP32", 100);
 
 //================================================
 // SLAVE PACKET FORMAT
@@ -76,13 +74,13 @@ BleGamepad bleGamepad("ESP32_Modular_Gamepad","ESP32",100);
 
 typedef struct
 {
-    char name[32];
+    uint8_t slaveID;
     uint32_t buttons;
-    int16_t axis[3];    // 3 axes per slave
+    int16_t axis[3];
 } GamepadPacket;
 
 //================================================
-// SLAVE STORAGE
+// SLAVE STORAGE (Fixed slots: Slave 1 and Slave 2)
 //================================================
 
 struct SlaveDevice
@@ -93,42 +91,30 @@ struct SlaveDevice
     unsigned long lastSeen;
 };
 
-SlaveDevice slaves[MAX_SLAVES];
+SlaveDevice slaves[2];  // Slave 0 = ID1, Slave 1 = ID2
 
 //================================================
-// FIND / REGISTER SLAVE
+// REGISTER / UPDATE SLAVE
 //================================================
 
-int findSlave(uint8_t *mac)
+void registerSlave(uint8_t *mac, uint8_t slaveID)
 {
-    for(int i = 0; i < MAX_SLAVES; i++)
+    if(slaveID < 1 || slaveID > 2) return;
+
+    int idx = slaveID - 1;
+    memcpy(slaves[idx].mac, mac, 6);
+    slaves[idx].active = true;
+    slaves[idx].lastSeen = millis();
+
+    Serial.print("Slave ");
+    Serial.print(slaveID);
+    Serial.print(" registered: ");
+    for(int b = 0; b < 6; b++)
     {
-        if(memcmp(slaves[i].mac, mac, 6) == 0)
-            return i;
+        Serial.print(mac[b], HEX);
+        if(b < 5) Serial.print(":");
     }
-
-    for(int i = 0; i < MAX_SLAVES; i++)
-    {
-        if(!slaves[i].active)
-        {
-            memcpy(slaves[i].mac, mac, 6);
-            slaves[i].active = true;
-
-            Serial.print("New slave registered: ");
-
-            for(int b = 0; b < 6; b++)
-            {
-                Serial.print(mac[b], HEX);
-                if(b < 5) Serial.print(":");
-            }
-
-            Serial.println();
-
-            return i;
-        }
-    }
-
-    return -1;
+    Serial.println();
 }
 
 //================================================
@@ -142,12 +128,11 @@ void onReceive(const uint8_t *mac, const uint8_t *data, int len)
     GamepadPacket packet;
     memcpy(&packet, data, sizeof(packet));
 
-    int id = findSlave((uint8_t*)mac);
+    registerSlave((uint8_t*)mac, packet.slaveID);
 
-    if(id < 0) return;
-
-    slaves[id].data = packet;
-    slaves[id].lastSeen = millis();
+    int idx = packet.slaveID - 1;
+    slaves[idx].data = packet;
+    slaves[idx].lastSeen = millis();
 }
 
 //================================================
@@ -165,7 +150,6 @@ void initESPNow()
     }
 
     esp_now_register_recv_cb(onReceive);
-
     Serial.println("ESP-NOW READY");
 }
 
@@ -206,22 +190,31 @@ void mergeSlaveInputs()
     {
         if(!slaves[i].active) continue;
 
-        // Timeout check (1 second)
+        // Timeout check
         if(millis() - slaves[i].lastSeen > 1000)
             continue;
 
-        // Map slave buttons to master buttons (starting at button 12)
-        // Slave 0: buttons 12-17 (6 buttons)
-        // Slave 1: buttons 18-23 (6 buttons)
-        buttons |= (slaves[i].data.buttons << (12 + (i * 6)));
+        uint8_t slaveID = i + 1;
 
-        // Map slave axes
-        // Slave 0: axes 0-2
-        // Slave 1: axes 3-5
-        for(int a = 0; a < 3; a++)
+        if(slaveID == 1)
         {
-            if(slaves[i].data.axis[a] != 0)
-                axis[(i * 3) + a] = slaves[i].data.axis[a];
+            // Slave 1: buttons 1-6 (bit positions 0-5)
+            buttons |= (slaves[i].data.buttons & 0x3F);
+
+            // Slave 1: axes X, Y, Z (axis positions 0, 1, 2)
+            axis[0] = slaves[i].data.axis[0];
+            axis[1] = slaves[i].data.axis[1];
+            axis[2] = slaves[i].data.axis[2];
+        }
+        else if(slaveID == 2)
+        {
+            // Slave 2: buttons 7-13 (bit positions 6-12)
+            buttons |= ((slaves[i].data.buttons & 0x7F) << 6);
+
+            // Slave 2: axes RZ, RX, RY (axis positions 3, 4, 5)
+            axis[3] = slaves[i].data.axis[0];
+            axis[4] = slaves[i].data.axis[1];
+            axis[5] = slaves[i].data.axis[2];
         }
     }
 }
@@ -241,9 +234,7 @@ void updateUSB()
 
     uint8_t hat = 0;
 
-    usbGamepad.send(
-        x, y, z, rz, rx, ry, hat, buttons
-    );
+    usbGamepad.send(x, y, z, rz, rx, ry, hat, buttons);
 }
 
 //================================================
@@ -254,7 +245,7 @@ void updateBLE()
 {
     if(!bleGamepad.isConnected()) return;
 
-    for(int i = 0; i < MAX_BUTTONS; i++)
+    for(int i = 0; i < 26; i++)
     {
         if(buttons & (1 << i))
             bleGamepad.press(i + 1);
@@ -298,7 +289,6 @@ void setup()
     pinMode(BTN2, INPUT_PULLUP);
 
     detectMode();
-
     initESPNow();
 
     if(mode == MODE_USB)
