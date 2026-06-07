@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_now.h>
+#include <Wire.h>
+#include <MPU6050_light.h>
 #include <BleGamepad.h>
 
 //================================================
@@ -18,12 +20,16 @@
 #define D2 17
 #define D3 16
 
-#define A0 36
-#define A1 39
-
 // Mode buttons
 #define MODE_BTN_1 27  // First mode button
 #define MODE_BTN_2 14  // Second mode button
+
+// Axis buttons
+#define AXIS_Y_BTN 25  // Y axis button (Left Trigger)
+#define AXIS_Z_BTN 26  // Z axis button (Right Trigger)
+
+// Zero button
+#define ZERO_BTN 19    // Zero steering button
 
 //================================================
 // OPERATING MODES
@@ -40,7 +46,9 @@ uint8_t operatingMode = MODE_BLE_AND_ESPNOW;  // Default mode
 //================================================
 
 bool digitalInputs[6];
-uint16_t analogInputs[3];
+int16_t xAxisValue = 0;
+int16_t yAxisValue = 0;
+int16_t zAxisValue = 0;
 
 //================================================
 // GAMEPAD STATE
@@ -73,6 +81,47 @@ GamepadPacket packet;
 //================================================
 
 BleGamepad bleGamepad;
+
+//================================================
+// MPU6050
+//================================================
+
+MPU6050 mpu(Wire);
+
+//================================================
+// FILTER SETTINGS
+//================================================
+
+float angleOffset = 0.0f;
+bool zeroButtonState = false;
+bool lastZeroButtonState = false;
+
+float smoothedAngle = 0.0f;
+const float alpha = 0.1f;
+
+//================================================
+// SAMPLING
+//================================================
+
+const unsigned long sampleIntervalUS = 2000;
+unsigned long lastSampleTime = 0;
+
+//================================================
+// AVERAGING
+//================================================
+
+float sampleBuffer[10];
+uint8_t sampleIndex = 0;
+uint8_t sampleCount = 0;
+
+//================================================
+// STEERING
+//================================================
+
+const float maxAngle = 80.0f;
+const int16_t maxStick = 32767;
+const int16_t deadzone = 0;
+const float steeringGain = 1.0f;
 
 //================================================
 // MODE DETECTION
@@ -114,33 +163,102 @@ void readInputs()
     digitalInputs[3] = !digitalRead(D3);
     digitalInputs[4] = !digitalRead(MODE_BTN_1);
     digitalInputs[5] = !digitalRead(MODE_BTN_2);
-
-    analogInputs[0] = analogRead(A0);
-    analogInputs[1] = analogRead(A1);
-    analogInputs[2] = analogRead(35);  // Add third analog input if available
 }
 
 //================================================
-// ANALOG PROCESSING
+// PROCESS MPU6050
 //================================================
 
-int16_t processAnalog(uint8_t index, int raw)
+void processMpu6050()
 {
-    int center = 2048;
-    int deadzone = 100;
-    bool invert = false;
-    int outMin = -32767;
-    int outMax = 32767;
+    mpu.update();
 
-    if(abs(raw - center) < deadzone)
-        raw = center;
+    // =====================================
+    // Zero Button
+    // =====================================
+    zeroButtonState = (digitalRead(ZERO_BTN) == LOW);
 
-    long v = map(raw, 0, 4095, outMin, outMax);
+    if (zeroButtonState && !lastZeroButtonState)
+    {
+        angleOffset = mpu.getAngleX();
+        smoothedAngle = 0.0f;
 
-    if(invert)
-        v = -v;
+        for (int i = 0; i < 10; i++)
+        {
+            sampleBuffer[i] = 0.0f;
+        }
 
-    return constrain(v, outMin, outMax);
+        sampleIndex = 0;
+        sampleCount = 0;
+
+        Serial.println("Angle Zeroed");
+    }
+
+    lastZeroButtonState = zeroButtonState;
+
+    // =====================================
+    // Sampling
+    // =====================================
+    unsigned long now = micros();
+
+    if ((now - lastSampleTime) >= sampleIntervalUS)
+    {
+        lastSampleTime = now;
+
+        float rawAngle = mpu.getAngleX() - angleOffset;
+
+        smoothedAngle = alpha * rawAngle + (1.0f - alpha) * smoothedAngle;
+
+        smoothedAngle = constrain(smoothedAngle, -maxAngle, maxAngle);
+
+        sampleBuffer[sampleIndex] = smoothedAngle;
+
+        sampleIndex++;
+
+        if (sampleIndex >= 10)
+            sampleIndex = 0;
+
+        if (sampleCount < 10)
+            sampleCount++;
+
+        // =====================================
+        // Average every 10 samples
+        // =====================================
+        if (sampleCount == 10 && sampleIndex == 0)
+        {
+            float sum = 0.0f;
+
+            for (int i = 0; i < 10; i++)
+            {
+                sum += sampleBuffer[i];
+            }
+
+            float avgAngle = sum / 10.0f;
+
+            avgAngle = constrain(avgAngle, -maxAngle, maxAngle);
+
+            // =====================================
+            // Steering Mapping
+            // =====================================
+
+            float normalized = avgAngle / maxAngle;
+            float scaled = normalized * steeringGain;
+            scaled = constrain(scaled, -1.0f, 1.0f);
+
+            xAxisValue = (int16_t)(scaled * maxStick);
+
+            if (abs(xAxisValue) < deadzone)
+                xAxisValue = 0;
+        }
+    }
+
+    // Y axis from GPIO25 button (max when pressed, min when released)
+    bool yBtnPressed = digitalRead(AXIS_Y_BTN) == LOW;
+    yAxisValue = yBtnPressed ? 32767 : -32767;
+
+    // Z axis from GPIO26 button (max when pressed, min when released)
+    bool zBtnPressed = digitalRead(AXIS_Z_BTN) == LOW;
+    zAxisValue = zBtnPressed ? 32767 : -32767;
 }
 
 //================================================
@@ -159,10 +277,10 @@ void applyMapping()
             buttons |= (1 << i);
     }
 
-    // Analog inputs -> axes
-    axis[0] = processAnalog(0, analogInputs[0]);
-    axis[1] = processAnalog(1, analogInputs[1]);
-    axis[2] = processAnalog(2, analogInputs[2]);
+    // Axes from MPU6050 and buttons
+    axis[0] = xAxisValue;  // X from MPU6050
+    axis[1] = yAxisValue;  // Y from GPIO25
+    axis[2] = zAxisValue;  // Z from GPIO26
 }
 
 //================================================
@@ -185,7 +303,7 @@ void sendBleGamepad()
 
     // Map analog sticks
     bleGamepad.setLeftStick(axis[0], axis[1]);
-    bleGamepad.setRightStick(0, 0);  // Or use axis[2] for right stick
+    bleGamepad.setRightStick(axis[2], 0);
 
     bleGamepad.sendReport();
 }
@@ -201,6 +319,41 @@ void sendESPNOW()
     memcpy(packet.axis, axis, sizeof(axis));
 
     esp_now_send(masterAddress, (uint8_t*)&packet, sizeof(packet));
+}
+
+//================================================
+// INIT MPU6050
+//================================================
+
+void initMpu6050()
+{
+    Wire.begin(21, 22);
+
+    Serial.println("Initializing MPU6050...");
+
+    byte status = mpu.begin();
+
+    if (status != 0)
+    {
+        Serial.print("MPU6050 Error: ");
+        Serial.println(status);
+        while(1)
+        {
+            delay(100);
+        }
+    }
+
+    delay(1000);
+
+    Serial.println("Calibrating MPU6050...");
+    mpu.calcOffsets(true, true);
+
+    for (int i = 0; i < 10; i++)
+    {
+        sampleBuffer[i] = 0.0f;
+    }
+
+    Serial.println("MPU6050 initialized");
 }
 
 //================================================
@@ -256,8 +409,18 @@ void setup()
     pinMode(D3, INPUT_PULLUP);
     pinMode(MODE_BTN_1, INPUT_PULLUP);
     pinMode(MODE_BTN_2, INPUT_PULLUP);
+    pinMode(AXIS_Y_BTN, INPUT_PULLUP);
+    pinMode(AXIS_Z_BTN, INPUT_PULLUP);
+    pinMode(ZERO_BTN, INPUT_PULLUP);
 
-    analogReadResolution(12);
+    Serial.println();
+    Serial.println("================================");
+    Serial.println(" ELGP CONTROLLER SLAVE");
+    Serial.println("================================");
+    Serial.println();
+
+    // Initialize MPU6050
+    initMpu6050();
 
     // Detect operating mode based on button presses at startup
     detectMode();
@@ -276,6 +439,17 @@ void setup()
         initBleGamepad();
         initESPNow();
     }
+
+    Serial.println("GPIO19 = Zero Steering");
+    Serial.println("GPIO25 = Y Axis (Left Trigger)");
+    Serial.println("GPIO26 = Z Axis (Right Trigger)");
+    Serial.println("GPIO27 = Mode Button 1");
+    Serial.println("GPIO14 = Mode Button 2");
+    Serial.println("GPIO16 = Button D3");
+    Serial.println("GPIO17 = Button D2");
+    Serial.println("GPIO18 = Button D1");
+    Serial.println("GPIO19 = Button D0");
+    Serial.println();
 }
 
 //================================================
@@ -286,6 +460,7 @@ unsigned long lastSend = 0;
 
 void loop()
 {
+    processMpu6050();
     readInputs();
     applyMapping();
 
