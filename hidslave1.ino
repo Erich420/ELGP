@@ -32,19 +32,6 @@
 #define ZERO_BTN 23    // Zero steering button
 
 //================================================
-// BUTTON MAPPING ENUMS
-//================================================
-
-enum GamepadButtons
-{
-    GAMEPAD_D0 = 0,      // GPIO12
-    GAMEPAD_D1 = 1,      // GPIO4
-    GAMEPAD_D2 = 2,      // GPIO14
-    GAMEPAD_D3 = 3,      // GPIO16
-    GAMEPAD_BUTTON_COUNT = 4  // Only 4 actual gamepad buttons
-};
-
-//================================================
 // OPERATING MODES
 //================================================
 
@@ -58,10 +45,10 @@ uint8_t operatingMode = MODE_BLE_AND_ESPNOW;  // Default mode
 // INPUT STATE
 //================================================
 
-// Digital inputs (D0-D3 only, excluding MODE buttons)
-bool digitalInputs[4];
-bool lastDigitalInputs[4];
-uint8_t debounceCounter[4] = {0, 0, 0, 0};
+// Digital inputs (D0-D3 and MODE buttons)
+bool digitalInputs[6];
+bool lastDigitalInputs[6];
+uint8_t debounceCounter[6] = {0, 0, 0, 0, 0, 0};
 const uint8_t DEBOUNCE_THRESHOLD = 3;  // ~3-5ms debounce
 
 int16_t xAxisValue = 0;
@@ -197,16 +184,18 @@ void detectMode()
 
 void readInputs()
 {
-    // Read raw input states
-    bool rawInputs[4] = {
+    // Read raw input states (D0-D3 and MODE buttons)
+    bool rawInputs[6] = {
         !digitalRead(D0),
         !digitalRead(D1),
         !digitalRead(D2),
-        !digitalRead(D3)
+        !digitalRead(D3),
+        !digitalRead(MODE_BTN_1),
+        !digitalRead(MODE_BTN_2)
     };
 
     // Simple debouncing: counter-based
-    for(int i = 0; i < 4; i++)
+    for(int i = 0; i < 6; i++)
     {
         if(rawInputs[i] == lastDigitalInputs[i])
         {
@@ -381,9 +370,8 @@ void applyMapping()
     buttons = 0;
     memset(axis, 0, sizeof(axis));
 
-    // Digital inputs (D0-D3 only) -> buttons
-    // MODE buttons are excluded from gamepad output
-    for(int i = 0; i < GAMEPAD_BUTTON_COUNT; i++)
+    // Digital inputs (D0-D3 and MODE buttons) -> buttons
+    for(int i = 0; i < 6; i++)
     {
         if(digitalInputs[i])
             buttons |= (1 << i);
@@ -404,11 +392,11 @@ void sendBleGamepad()
     if(!bleGamepad.isConnected())
         return;
 
-    // Map buttons to BLE gamepad (D0-D3 only)
-    for(int i = 0; i < GAMEPAD_BUTTON_COUNT; i++)
+    // Map buttons to BLE gamepad (all 6 buttons)
+    for(int i = 0; i < 6; i++)
     {
         if(digitalInputs[i])
-            bleGamepad.press(i + 1);  // Button 1-4
+            bleGamepad.press(i + 1);  // Button 1-6
         else
             bleGamepad.release(i + 1);
     }
@@ -560,8 +548,8 @@ void setup()
     Serial.println("GPIO23 = Zero Steering");
     Serial.println("GPIO36 = Y Axis Potentiometer (Left Trigger)");
     Serial.println("GPIO39 = Z Axis Potentiometer (Right Trigger)");
-    Serial.println("GPIO27 = Mode Button 1 (not sent as gamepad button)");
-    Serial.println("GPIO17 = Mode Button 2 (not sent as gamepad button)");
+    Serial.println("GPIO27 = Mode Button 1");
+    Serial.println("GPIO17 = Mode Button 2");
     Serial.println("GPIO16 = Button D3");
     Serial.println("GPIO14 = Button D2");
     Serial.println("GPIO4 = Button D1");
