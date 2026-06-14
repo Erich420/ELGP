@@ -32,6 +32,19 @@
 #define ZERO_BTN 23    // Zero steering button
 
 //================================================
+// BUTTON MAPPING ENUMS
+//================================================
+
+enum GamepadButtons
+{
+    GAMEPAD_D0 = 0,      // GPIO12
+    GAMEPAD_D1 = 1,      // GPIO4
+    GAMEPAD_D2 = 2,      // GPIO14
+    GAMEPAD_D3 = 3,      // GPIO16
+    GAMEPAD_BUTTON_COUNT = 4  // Only 4 actual gamepad buttons
+};
+
+//================================================
 // OPERATING MODES
 //================================================
 
@@ -45,7 +58,12 @@ uint8_t operatingMode = MODE_BLE_AND_ESPNOW;  // Default mode
 // INPUT STATE
 //================================================
 
-bool digitalInputs[6];
+// Digital inputs (D0-D3 only, excluding MODE buttons)
+bool digitalInputs[4];
+bool lastDigitalInputs[4];
+uint8_t debounceCounter[4] = {0, 0, 0, 0};
+const uint8_t DEBOUNCE_THRESHOLD = 3;  // ~3-5ms debounce
+
 int16_t xAxisValue = 0;
 int16_t yAxisValue = 0;
 int16_t zAxisValue = 0;
@@ -125,11 +143,25 @@ const int16_t deadzone = 0;
 const float steeringGain = 1.0f;
 
 //================================================
-// POTENTIOMETER SETTINGS
+// POTENTIOMETER SETTINGS - NON-BLOCKING
 //================================================
 
-const int numberOfPotSamples = 5;     // Number of pot samples to take (to smooth the values)
-const int delayBetweenSamples = 1;    // Delay in milliseconds between pot samples
+const uint8_t POT_SAMPLE_COUNT = 5;
+const uint16_t ADC_MAX = 4095;
+const uint16_t ADC_MIN = 0;
+
+// Circular buffer for non-blocking pot sampling
+struct PotentiometerState
+{
+    uint16_t sampleBuffer[POT_SAMPLE_COUNT];
+    uint8_t sampleIndex;
+    uint8_t samplesCollected;
+    unsigned long lastSampleTime;
+    const unsigned long sampleInterval = 1000;  // 1ms between samples
+};
+
+PotentiometerState yAxisPot = {{0}, 0, 0, 0};
+PotentiometerState zAxisPot = {{0}, 0, 0, 0};
 
 //================================================
 // MODE DETECTION
@@ -149,64 +181,107 @@ void detectMode()
     }
     else if(btn2Pressed && !btn1Pressed)
     {
-       
         operatingMode = MODE_BLE_AND_ESPNOW;
         Serial.println("Mode: BLE GAMEPAD + ESP-NOW");
     }
     else
     {
-       operatingMode = MODE_ESPNOW_ONLY;
+        operatingMode = MODE_ESPNOW_ONLY;
         Serial.println("Mode: ESP-NOW ONLY");
     }
 }
 
 //================================================
-// READ INPUTS
+// READ INPUTS WITH DEBOUNCING
 //================================================
 
 void readInputs()
 {
-    digitalInputs[0] = !digitalRead(D0);
-    digitalInputs[1] = !digitalRead(D1);
-    digitalInputs[2] = !digitalRead(D2);
-    digitalInputs[3] = !digitalRead(D3);
-    digitalInputs[4] = !digitalRead(MODE_BTN_1);
-    digitalInputs[5] = !digitalRead(MODE_BTN_2);
+    // Read raw input states
+    bool rawInputs[4] = {
+        !digitalRead(D0),
+        !digitalRead(D1),
+        !digitalRead(D2),
+        !digitalRead(D3)
+    };
+
+    // Simple debouncing: counter-based
+    for(int i = 0; i < 4; i++)
+    {
+        if(rawInputs[i] == lastDigitalInputs[i])
+        {
+            // Input consistent with last state
+            if(debounceCounter[i] < DEBOUNCE_THRESHOLD)
+                debounceCounter[i]++;
+            
+            // Confirm state after threshold
+            if(debounceCounter[i] >= DEBOUNCE_THRESHOLD)
+                digitalInputs[i] = lastDigitalInputs[i];
+        }
+        else
+        {
+            // Input changed, reset counter
+            debounceCounter[i] = 0;
+            lastDigitalInputs[i] = rawInputs[i];
+        }
+    }
 }
 
 //================================================
-// READ POTENTIOMETERS
+// NON-BLOCKING POTENTIOMETER SAMPLING
 //================================================
+
+void updatePotentiometerSampling(PotentiometerState &pot, uint8_t adcPin)
+{
+    unsigned long now = micros();
+    
+    if((now - pot.lastSampleTime) >= (pot.sampleInterval * 1000))
+    {
+        pot.lastSampleTime = now;
+        
+        // Collect one sample
+        pot.sampleBuffer[pot.sampleIndex] = analogRead(adcPin);
+        pot.sampleIndex++;
+        
+        if(pot.sampleIndex >= POT_SAMPLE_COUNT)
+            pot.sampleIndex = 0;
+        
+        if(pot.samplesCollected < POT_SAMPLE_COUNT)
+            pot.samplesCollected++;
+    }
+}
+
+int16_t calculateAveragedPotValue(const PotentiometerState &pot)
+{
+    if(pot.samplesCollected == 0)
+        return 0;
+    
+    uint32_t sum = 0;
+    for(uint8_t i = 0; i < pot.samplesCollected; i++)
+    {
+        sum += pot.sampleBuffer[i];
+    }
+    
+    int potValue = sum / pot.samplesCollected;
+    
+    // Constrain to valid range
+    potValue = constrain(potValue, ADC_MIN, ADC_MAX);
+    
+    // Map to axis range (-32767 to 32767)
+    int16_t mappedValue = (int16_t)map(potValue, ADC_MIN, ADC_MAX, 32767, -32767);
+    
+    return mappedValue;
+}
 
 void readPotentiometers()
 {
-    // Read Y axis potentiometer (Pin 36)
-    int yPotValues[numberOfPotSamples];
-    int yPotValue = 0;
+    // Non-blocking: only collect one sample per call
+    updatePotentiometerSampling(yAxisPot, AXIS_Y_PIN);
+    updatePotentiometerSampling(zAxisPot, AXIS_Z_PIN);
     
-    for (int i = 0; i < numberOfPotSamples; i++)
-    {
-        yPotValues[i] = analogRead(AXIS_Y_PIN);
-        yPotValue += yPotValues[i];
-        delay(delayBetweenSamples);
-    }
-    
-    yPotValue = yPotValue / numberOfPotSamples;
-    yAxisValue = (int16_t)map(yPotValue, 0, 4095, 32767, -32767);
-    
-    // Read Z axis potentiometer (Pin 39)
-    int zPotValues[numberOfPotSamples];
-    int zPotValue = 0;
-    
-    for (int i = 0; i < numberOfPotSamples; i++)
-    {
-        zPotValues[i] = analogRead(AXIS_Z_PIN);
-        zPotValue += zPotValues[i];
-        delay(delayBetweenSamples);
-    }
-    
-    zPotValue = zPotValue / numberOfPotSamples;
-    zAxisValue = (int16_t)map(zPotValue, 0, 4095, 32767, -32767);
+    // Update axis values from averaged samples
+    yAxisValue = calculateAveragedPotValue(yAxisPot);
+    zAxisValue = calculateAveragedPotValue(zAxisPot);
 }
 
 //================================================
@@ -306,8 +381,9 @@ void applyMapping()
     buttons = 0;
     memset(axis, 0, sizeof(axis));
 
-    // Digital inputs (D0-D3) -> buttons
-    for(int i = 0; i < 6; i++)
+    // Digital inputs (D0-D3 only) -> buttons
+    // MODE buttons are excluded from gamepad output
+    for(int i = 0; i < GAMEPAD_BUTTON_COUNT; i++)
     {
         if(digitalInputs[i])
             buttons |= (1 << i);
@@ -328,8 +404,8 @@ void sendBleGamepad()
     if(!bleGamepad.isConnected())
         return;
 
-    // Map buttons to BLE gamepad
-    for(int i = 0; i < 6; i++)
+    // Map buttons to BLE gamepad (D0-D3 only)
+    for(int i = 0; i < GAMEPAD_BUTTON_COUNT; i++)
     {
         if(digitalInputs[i])
             bleGamepad.press(i + 1);  // Button 1-4
@@ -354,7 +430,13 @@ void sendESPNOW()
     packet.buttons = buttons;
     memcpy(packet.axis, axis, sizeof(axis));
 
-    esp_now_send(masterAddress, (uint8_t*)&packet, sizeof(packet));
+    esp_err_t result = esp_now_send(masterAddress, (uint8_t*)&packet, sizeof(packet));
+    
+    if(result != ESP_OK)
+    {
+        Serial.print("ESP-NOW Send Error: ");
+        Serial.println(result);
+    }
 }
 
 //================================================
@@ -478,8 +560,8 @@ void setup()
     Serial.println("GPIO23 = Zero Steering");
     Serial.println("GPIO36 = Y Axis Potentiometer (Left Trigger)");
     Serial.println("GPIO39 = Z Axis Potentiometer (Right Trigger)");
-    Serial.println("GPIO27 = Mode Button 1");
-    Serial.println("GPIO17 = Mode Button 2");
+    Serial.println("GPIO27 = Mode Button 1 (not sent as gamepad button)");
+    Serial.println("GPIO17 = Mode Button 2 (not sent as gamepad button)");
     Serial.println("GPIO16 = Button D3");
     Serial.println("GPIO14 = Button D2");
     Serial.println("GPIO4 = Button D1");
@@ -523,6 +605,4 @@ void loop()
             lastSend = millis();
         }
     }
-
-    delay(1);
 }
