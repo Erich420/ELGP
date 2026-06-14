@@ -24,11 +24,10 @@
 #define MODE_BTN_1 27  // First mode button
 #define MODE_BTN_2 17  // Second mode button
 
-// Axis buttons
-#define AXIS_Y_BTN 25  // Y axis button (Left Trigger)
-#define AXIS_y_BTN 26  // Z axis button (Right Trigger)
-#define AXIS_Z_BTN 19  
-#define AXIS_z_BTN 18 
+// Analog axis pins (Potentiometers)
+#define AXIS_Y_PIN 36  // Y axis potentiometer (Left Trigger)
+#define AXIS_Z_PIN 39  // Z axis potentiometer (Right Trigger)
+
 // Zero button
 #define ZERO_BTN 23    // Zero steering button
 
@@ -126,6 +125,13 @@ const int16_t deadzone = 0;
 const float steeringGain = 1.0f;
 
 //================================================
+// POTENTIOMETER SETTINGS
+//================================================
+
+const int numberOfPotSamples = 5;     // Number of pot samples to take (to smooth the values)
+const int delayBetweenSamples = 1;    // Delay in milliseconds between pot samples
+
+//================================================
 // MODE DETECTION
 //================================================
 
@@ -166,6 +172,41 @@ void readInputs()
     digitalInputs[3] = !digitalRead(D3);
     digitalInputs[4] = !digitalRead(MODE_BTN_1);
     digitalInputs[5] = !digitalRead(MODE_BTN_2);
+}
+
+//================================================
+// READ POTENTIOMETERS
+//================================================
+
+void readPotentiometers()
+{
+    // Read Y axis potentiometer (Pin 36)
+    int yPotValues[numberOfPotSamples];
+    int yPotValue = 0;
+    
+    for (int i = 0; i < numberOfPotSamples; i++)
+    {
+        yPotValues[i] = analogRead(AXIS_Y_PIN);
+        yPotValue += yPotValues[i];
+        delay(delayBetweenSamples);
+    }
+    
+    yPotValue = yPotValue / numberOfPotSamples;
+    yAxisValue = (int16_t)map(yPotValue, 0, 4095, 32767, -32767);
+    
+    // Read Z axis potentiometer (Pin 39)
+    int zPotValues[numberOfPotSamples];
+    int zPotValue = 0;
+    
+    for (int i = 0; i < numberOfPotSamples; i++)
+    {
+        zPotValues[i] = analogRead(AXIS_Z_PIN);
+        zPotValue += zPotValues[i];
+        delay(delayBetweenSamples);
+    }
+    
+    zPotValue = zPotValue / numberOfPotSamples;
+    zAxisValue = (int16_t)map(zPotValue, 0, 4095, 32767, -32767);
 }
 
 //================================================
@@ -254,37 +295,6 @@ void processMpu6050()
                 xAxisValue = 0;
         }
     }
-
-    // Y axis from GPIO25 button (max when pressed, min when released)
-    bool YBtnPressed = digitalRead(AXIS_Y_BTN) == LOW;
-      bool yBtnPressed = digitalRead(AXIS_y_BTN) == LOW;
-    //zAxisValue = yBtnPressed ? 0 : 16384;
-
-    // Z axis from GPIO26 button (max when pressed, min when released)
-    bool ZBtnPressed = digitalRead(AXIS_Z_BTN) == LOW;
-
-   bool zBtnPressed = digitalRead(AXIS_z_BTN) == LOW;
-  
-    if(!zBtnPressed && ZBtnPressed){
-      zAxisValue = 32767;
-    }
-     if(zBtnPressed && !ZBtnPressed){
-    zAxisValue = 0;
-    }
-     if(!zBtnPressed && !ZBtnPressed){
-    zAxisValue = 16384;
-    }
-  
-    if(!yBtnPressed && YBtnPressed){
-      yAxisValue = 32767;
-    }
- if(yBtnPressed && !YBtnPressed){
-    yAxisValue = 0;
-    }
-   if(!yBtnPressed && !YBtnPressed){
-    yAxisValue = 16384;
-    }
-    //zAxisValue = zBtnPressed ? 32767 : 16384;
 }
 
 //================================================
@@ -303,10 +313,10 @@ void applyMapping()
             buttons |= (1 << i);
     }
 
-    // Axes from MPU6050 and buttons
+    // Axes from MPU6050 and potentiometers
     axis[0] = xAxisValue;  // X from MPU6050
-    axis[1] = yAxisValue;  // Y from GPIO25
-    axis[2] = zAxisValue;  // Z from GPIO26
+    axis[1] = yAxisValue;  // Y from Pin 36 potentiometer
+    axis[2] = zAxisValue;  // Z from Pin 39 potentiometer
 }
 
 //================================================
@@ -436,10 +446,6 @@ void setup()
     pinMode(D3, INPUT_PULLUP);
     pinMode(MODE_BTN_1, INPUT_PULLUP);
     pinMode(MODE_BTN_2, INPUT_PULLUP);
-    pinMode(AXIS_Y_BTN, INPUT_PULLUP);
-    pinMode(AXIS_Z_BTN, INPUT_PULLUP);
-      pinMode(AXIS_y_BTN, INPUT_PULLUP);
-    pinMode(AXIS_z_BTN, INPUT_PULLUP);
     pinMode(ZERO_BTN, INPUT_PULLUP);
 
     Serial.println();
@@ -469,15 +475,15 @@ void setup()
         initESPNow();
     }
 
-    Serial.println("GPIO19 = Zero Steering");
-    Serial.println("GPIO25 = Y Axis (Left Trigger)");
-    Serial.println("GPIO26 = Z Axis (Right Trigger)");
+    Serial.println("GPIO23 = Zero Steering");
+    Serial.println("GPIO36 = Y Axis Potentiometer (Left Trigger)");
+    Serial.println("GPIO39 = Z Axis Potentiometer (Right Trigger)");
     Serial.println("GPIO27 = Mode Button 1");
-    Serial.println("GPIO14 = Mode Button 2");
+    Serial.println("GPIO17 = Mode Button 2");
     Serial.println("GPIO16 = Button D3");
-    Serial.println("GPIO17 = Button D2");
-    Serial.println("GPIO18 = Button D1");
-    Serial.println("GPIO19 = Button D0");
+    Serial.println("GPIO14 = Button D2");
+    Serial.println("GPIO4 = Button D1");
+    Serial.println("GPIO12 = Button D0");
     Serial.println();
 }
 
@@ -491,6 +497,7 @@ void loop()
 {
     processMpu6050();
     readInputs();
+    readPotentiometers();
     applyMapping();
 
     // Send based on operating mode
