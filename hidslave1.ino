@@ -15,19 +15,20 @@
 // GPIO PINS
 //================================================
 
-#define D0 19
-#define D1 18
-#define D2 17
+#define D0 12
+#define D1 4
+#define D2 14
 #define D3 16
 
 // Mode buttons
 #define MODE_BTN_1 27  // First mode button
-#define MODE_BTN_2 14  // Second mode button
+#define MODE_BTN_2 17  // Second mode button
 
 // Axis buttons
 #define AXIS_Y_BTN 25  // Y axis button (Left Trigger)
-#define AXIS_Z_BTN 26  // Z axis button (Right Trigger)
-
+#define AXIS_y_BTN 26  // Z axis button (Right Trigger)
+#define AXIS_Z_BTN 19  
+#define AXIS_z_BTN 18 
 // Zero button
 #define ZERO_BTN 23    // Zero steering button
 
@@ -80,7 +81,8 @@ GamepadPacket packet;
 // BLE GAMEPAD
 //================================================
 
-BleGamepad bleGamepad;
+//USBHIDGamepad usbGamepad;
+BleGamepad bleGamepad("EL-GP1", "LEHIVXX", 69);
 
 //================================================
 // MPU6050
@@ -141,13 +143,14 @@ void detectMode()
     }
     else if(btn2Pressed && !btn1Pressed)
     {
-        operatingMode = MODE_ESPNOW_ONLY;
-        Serial.println("Mode: ESP-NOW ONLY");
+       
+        operatingMode = MODE_BLE_AND_ESPNOW;
+        Serial.println("Mode: BLE GAMEPAD + ESP-NOW");
     }
     else
     {
-        operatingMode = MODE_BLE_AND_ESPNOW;
-        Serial.println("Mode: BLE GAMEPAD + ESP-NOW");
+       operatingMode = MODE_ESPNOW_ONLY;
+        Serial.println("Mode: ESP-NOW ONLY");
     }
 }
 
@@ -253,12 +256,35 @@ void processMpu6050()
     }
 
     // Y axis from GPIO25 button (max when pressed, min when released)
-    bool yBtnPressed = digitalRead(AXIS_Y_BTN) == LOW;
-    yAxisValue = yBtnPressed ? 32767 : -32767;
+    bool YBtnPressed = digitalRead(AXIS_Y_BTN) == LOW;
+      bool yBtnPressed = digitalRead(AXIS_y_BTN) == LOW;
+    //zAxisValue = yBtnPressed ? 0 : 16384;
 
     // Z axis from GPIO26 button (max when pressed, min when released)
-    bool zBtnPressed = digitalRead(AXIS_Z_BTN) == LOW;
-    zAxisValue = zBtnPressed ? 32767 : -32767;
+    bool ZBtnPressed = digitalRead(AXIS_Z_BTN) == LOW;
+
+   bool zBtnPressed = digitalRead(AXIS_z_BTN) == LOW;
+  
+    if(!zBtnPressed && ZBtnPressed){
+      zAxisValue = 32767;
+    }
+     if(zBtnPressed && !ZBtnPressed){
+    zAxisValue = 0;
+    }
+     if(!zBtnPressed && !ZBtnPressed){
+    zAxisValue = 16384;
+    }
+  
+    if(!yBtnPressed && YBtnPressed){
+      yAxisValue = 32767;
+    }
+ if(yBtnPressed && !YBtnPressed){
+    yAxisValue = 0;
+    }
+   if(!yBtnPressed && !YBtnPressed){
+    yAxisValue = 16384;
+    }
+    //zAxisValue = zBtnPressed ? 32767 : 16384;
 }
 
 //================================================
@@ -271,7 +297,7 @@ void applyMapping()
     memset(axis, 0, sizeof(axis));
 
     // Digital inputs (D0-D3) -> buttons
-    for(int i = 0; i < 4; i++)
+    for(int i = 0; i < 6; i++)
     {
         if(digitalInputs[i])
             buttons |= (1 << i);
@@ -293,7 +319,7 @@ void sendBleGamepad()
         return;
 
     // Map buttons to BLE gamepad
-    for(int i = 0; i < 4; i++)
+    for(int i = 0; i < 6; i++)
     {
         if(digitalInputs[i])
             bleGamepad.press(i + 1);  // Button 1-4
@@ -385,7 +411,9 @@ void initBleGamepad()
 {
     BleGamepadConfiguration bleGamepadConfig;
     bleGamepadConfig.setControllerType(CONTROLLER_TYPE_GAMEPAD);
-    bleGamepadConfig.setButtonCount(4);
+    bleGamepadConfig.setButtonCount(24);
+//    bleGamepadConfig.setAxesMin(0x8001); // 0 --> int16_t - 16 bit signed integer - Can be in decimal or hexadecimal
+    bleGamepadConfig.setAxesMax(0x7FFF); // 32767 --> int16_t - 16 bit signed integer - Can be in decimal or hexadecimal 
     bleGamepadConfig.setIncludeStart(true);
     bleGamepadConfig.setIncludeSelect(true);
 
@@ -410,6 +438,8 @@ void setup()
     pinMode(MODE_BTN_2, INPUT_PULLUP);
     pinMode(AXIS_Y_BTN, INPUT_PULLUP);
     pinMode(AXIS_Z_BTN, INPUT_PULLUP);
+      pinMode(AXIS_y_BTN, INPUT_PULLUP);
+    pinMode(AXIS_z_BTN, INPUT_PULLUP);
     pinMode(ZERO_BTN, INPUT_PULLUP);
 
     Serial.println();
