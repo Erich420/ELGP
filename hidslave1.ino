@@ -15,14 +15,14 @@
 // GPIO PINS
 //================================================
 
-#define D0 12
-#define D1 4
-#define D2 14
-#define D3 16
+#define D0 19
+#define D1 33
+#define D2 18
+#define D3 25
 
 // Mode buttons
-#define MODE_BTN_1 27  // First mode button
-#define MODE_BTN_2 17  // Second mode button
+#define MODE_BTN_1 5  // First mode button
+#define MODE_BTN_2 26  // Second mode button
 
 // Analog axis pins (Potentiometers)
 #define AXIS_Y_PIN 36  // Y axis potentiometer (Left Trigger)
@@ -259,7 +259,7 @@ uint16_t ADC_MIN,uint16_t ADC_MAX )
     potValue = constrain(potValue, ADC_MIN, ADC_MAX);
   //  Serial.print(potValue);
     // Map to axis range (-32767 to 32767)
-    int16_t mappedValue = (int16_t)map(potValue, ADC_MIN, ADC_MAX, 32767, -32767);
+    int16_t mappedValue = (int16_t)map(potValue, ADC_MIN, ADC_MAX, -32767, 32767);
     
     return mappedValue;
 }
@@ -412,10 +412,11 @@ void sendBleGamepad()
 
     // Map analog sticks
   //  bleGamepad.setLeftThumb(axis[0], );
-     bleGamepad.setSteering(axis[0]);
-      bleGamepad.setBrake(axis[1]);
-    bleGamepad.setAccelerator(axis[2]);
+   //  bleGamepad.setSteering();
+  //    bleGamepad.setBrake(axis[1]);
+  //  bleGamepad.setAccelerator(axis[2]);
   //  bleGamepad.setRightThumb(axis[2], 0);
+        bleGamepad.setAxes(axis[0], 0, axis[1], 0, axis[2], 0, 0, 0);       //(X, Y, Z, RX, RY, RZ)
 
     bleGamepad.sendReport();
 }
@@ -504,8 +505,8 @@ void initBleGamepad()
     BleGamepadConfiguration bleGamepadConfig;
     bleGamepadConfig.setControllerType(CONTROLLER_TYPE_GAMEPAD);
     bleGamepadConfig.setButtonCount(24);
-      bleGamepadConfig.setWhichAxes(true, true, true, true, true, true, false, false);      // Can also be done per-axis individually. All are true by default
-    bleGamepadConfig.setWhichSimulationControls(false, false, true, true, true); // Can also be done per-control individually. All are false by default
+   //  bleGamepadConfig.setWhichAxes(true, true, true, true, true, true, false, false);      // Can also be done per-axis individually. All are true by default
+  //  bleGamepadConfig.setWhichSimulationControls(false, false, true, true, true); // Can also be done per-control individually. All are false by default
    // bleGamepadConfig.setHatSwitchCount(numOfHatSwitches);                                                                      // 1 by default
 
    bleGamepadConfig.setAxesMin(0x8000); // 0 --> int16_t - 16 bit signed integer - Can be in decimal or hexadecimal
