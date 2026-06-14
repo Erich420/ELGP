@@ -26,7 +26,7 @@
 
 // Analog axis pins (Potentiometers)
 #define AXIS_Y_PIN 36  // Y axis potentiometer (Left Trigger)
-#define AXIS_Z_PIN 39  // Z axis potentiometer (Right Trigger)
+#define AXIS_Z_PIN 34  // Z axis potentiometer (Right Trigger)
 
 // Zero button
 #define ZERO_BTN 23    // Zero steering button
@@ -133,9 +133,9 @@ const float steeringGain = 1.0f;
 // POTENTIOMETER SETTINGS - NON-BLOCKING
 //================================================
 
-const uint8_t POT_SAMPLE_COUNT = 5;
-const uint16_t ADC_MAX = 4095;
-const uint16_t ADC_MIN = 0;
+const uint8_t POT_SAMPLE_COUNT = 10;
+//const uint16_t ADC_MAX = 4095;
+//const uint16_t ADC_MIN = 0;
 
 // Circular buffer for non-blocking pot sampling
 struct PotentiometerState
@@ -144,11 +144,11 @@ struct PotentiometerState
     uint8_t sampleIndex;
     uint8_t samplesCollected;
     unsigned long lastSampleTime;
-    const unsigned long sampleInterval = 1000;  // 1ms between samples
+    unsigned long sampleInterval;
 };
 
-PotentiometerState yAxisPot = {{0}, 0, 0, 0};
-PotentiometerState zAxisPot = {{0}, 0, 0, 0};
+PotentiometerState yAxisPot = {{0}, 0, 0, 0, 2};
+PotentiometerState zAxisPot = {{0}, 0, 0, 0, 2};
 
 //================================================
 // MODE DETECTION
@@ -168,13 +168,14 @@ void detectMode()
     }
     else if(btn2Pressed && !btn1Pressed)
     {
-        operatingMode = MODE_BLE_AND_ESPNOW;
-        Serial.println("Mode: BLE GAMEPAD + ESP-NOW");
+        operatingMode = MODE_ESPNOW_ONLY;
+        Serial.println("Mode: ESP-NOW ONLY");
     }
     else
     {
-        operatingMode = MODE_ESPNOW_ONLY;
-        Serial.println("Mode: ESP-NOW ONLY");
+       
+             operatingMode = MODE_BLE_AND_ESPNOW;
+        Serial.println("Mode: BLE GAMEPAD + ESP-NOW");
     }
 }
 
@@ -240,7 +241,8 @@ void updatePotentiometerSampling(PotentiometerState &pot, uint8_t adcPin)
     }
 }
 
-int16_t calculateAveragedPotValue(const PotentiometerState &pot)
+int16_t calculateAveragedPotValue(const PotentiometerState &pot,
+uint16_t ADC_MIN,uint16_t ADC_MAX )
 {
     if(pot.samplesCollected == 0)
         return 0;
@@ -255,7 +257,7 @@ int16_t calculateAveragedPotValue(const PotentiometerState &pot)
     
     // Constrain to valid range
     potValue = constrain(potValue, ADC_MIN, ADC_MAX);
-    
+  //  Serial.print(potValue);
     // Map to axis range (-32767 to 32767)
     int16_t mappedValue = (int16_t)map(potValue, ADC_MIN, ADC_MAX, 32767, -32767);
     
@@ -267,10 +269,17 @@ void readPotentiometers()
     // Non-blocking: only collect one sample per call
     updatePotentiometerSampling(yAxisPot, AXIS_Y_PIN);
     updatePotentiometerSampling(zAxisPot, AXIS_Z_PIN);
-    
+     //Serial.print("y= ");
     // Update axis values from averaged samples
-    yAxisValue = calculateAveragedPotValue(yAxisPot);
-    zAxisValue = calculateAveragedPotValue(zAxisPot);
+    yAxisValue = calculateAveragedPotValue(yAxisPot,50,2700);
+ //   Serial.print(" | z= ");
+
+  zAxisValue = calculateAveragedPotValue(zAxisPot,400,3050);
+
+   
+ // Serial.print(yAxisValue);
+ //   Serial.print(" | z= ");
+// Serial.println();
 }
 
 //================================================
@@ -299,7 +308,7 @@ void processMpu6050()
         sampleIndex = 0;
         sampleCount = 0;
 
-        Serial.println("Angle Zeroed");
+       // Serial.println("Angle Zeroed");
     }
 
     lastZeroButtonState = zeroButtonState;
@@ -402,8 +411,11 @@ void sendBleGamepad()
     }
 
     // Map analog sticks
-    bleGamepad.setLeftThumb(axis[0], axis[1]);
-    bleGamepad.setRightThumb(axis[2], 0);
+  //  bleGamepad.setLeftThumb(axis[0], );
+     bleGamepad.setSteering(axis[0]);
+      bleGamepad.setBrake(axis[1]);
+    bleGamepad.setAccelerator(axis[2]);
+  //  bleGamepad.setRightThumb(axis[2], 0);
 
     bleGamepad.sendReport();
 }
@@ -422,8 +434,8 @@ void sendESPNOW()
     
     if(result != ESP_OK)
     {
-        Serial.print("ESP-NOW Send Error: ");
-        Serial.println(result);
+      //  Serial.print("ESP-NOW Send Error: ");
+     //   Serial.println(result);
     }
 }
 
@@ -435,7 +447,7 @@ void initMpu6050()
 {
     Wire.begin(21, 22);
 
-    Serial.println("Initializing MPU6050...");
+  //  Serial.println("Initializing MPU6050...");
 
     byte status = mpu.begin();
 
@@ -478,9 +490,9 @@ void initESPNow()
 
     esp_now_add_peer(&peer);
 
-    Serial.print("Slave ");
-    Serial.print(SLAVE_ID);
-    Serial.println(" ESP-NOW initialized");
+  //  Serial.print("Slave ");
+   // Serial.print(SLAVE_ID);
+  //  Serial.println(" ESP-NOW initialized");
 }
 
 //================================================
@@ -492,13 +504,19 @@ void initBleGamepad()
     BleGamepadConfiguration bleGamepadConfig;
     bleGamepadConfig.setControllerType(CONTROLLER_TYPE_GAMEPAD);
     bleGamepadConfig.setButtonCount(24);
-//    bleGamepadConfig.setAxesMin(0x8001); // 0 --> int16_t - 16 bit signed integer - Can be in decimal or hexadecimal
+      bleGamepadConfig.setWhichAxes(true, true, true, true, true, true, false, false);      // Can also be done per-axis individually. All are true by default
+    bleGamepadConfig.setWhichSimulationControls(false, false, true, true, true); // Can also be done per-control individually. All are false by default
+   // bleGamepadConfig.setHatSwitchCount(numOfHatSwitches);                                                                      // 1 by default
+
+   bleGamepadConfig.setAxesMin(0x8000); // 0 --> int16_t - 16 bit signed integer - Can be in decimal or hexadecimal
     bleGamepadConfig.setAxesMax(0x7FFF); // 32767 --> int16_t - 16 bit signed integer - Can be in decimal or hexadecimal 
+      bleGamepadConfig.setSimulationMin(0x8000);
+    bleGamepadConfig.setSimulationMax(0x7FFF);
     bleGamepadConfig.setIncludeStart(true);
     bleGamepadConfig.setIncludeSelect(true);
 
     bleGamepad.begin(&bleGamepadConfig);
-    Serial.println("BLE Gamepad initialized");
+   // Serial.println("BLE Gamepad initialized");
 }
 
 //================================================
@@ -518,11 +536,11 @@ void setup()
     pinMode(MODE_BTN_2, INPUT_PULLUP);
     pinMode(ZERO_BTN, INPUT_PULLUP);
 
-    Serial.println();
-    Serial.println("================================");
-    Serial.println(" ELGP CONTROLLER SLAVE");
-    Serial.println("================================");
-    Serial.println();
+  //  Serial.println();
+  //  Serial.println("================================");
+ // //  Serial.println(" ELGP CONTROLLER SLAVE");
+   // Serial.println("================================");
+  //  Serial.println();
 
     // Initialize MPU6050
     initMpu6050();
@@ -545,7 +563,7 @@ void setup()
         initESPNow();
     }
 
-    Serial.println("GPIO23 = Zero Steering");
+  /*  Serial.println("GPIO23 = Zero Steering");
     Serial.println("GPIO36 = Y Axis Potentiometer (Left Trigger)");
     Serial.println("GPIO39 = Z Axis Potentiometer (Right Trigger)");
     Serial.println("GPIO27 = Mode Button 1");
@@ -553,8 +571,8 @@ void setup()
     Serial.println("GPIO16 = Button D3");
     Serial.println("GPIO14 = Button D2");
     Serial.println("GPIO4 = Button D1");
-    Serial.println("GPIO12 = Button D0");
-    Serial.println();
+    Serial.println("GPIO12 = Button D0");*/
+  //  Serial.println();
 }
 
 //================================================
