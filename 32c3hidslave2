@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <U8g2lib.h>
 #include <Wire.h>
+#include <Preferences.h>
 
 #define SDA_PIN 5
 #define SCL_PIN 6
@@ -16,7 +17,16 @@ U8G2_SSD1306_72X40_ER_F_HW_I2C u8g2(U8G2_R0, /* reset=*/U8X8_PIN_NONE);
 #define AVG_COUNT 10
 #define SEND_INTERVAL 20
 
+// ───────────────────────────────
+// 📦 Data Structure & Instances
+// ───────────────────────────────
+struct ControlData {
+  int pot1;
+  int btn1;
+  int btn2;
+} data;
 
+Preferences prefs;
 
 // ───────────────────────────────
 // 📈 Averaging Buffers
@@ -166,6 +176,9 @@ void loop() {
       data.pot1 = constrain(pwm, 0, 200);
     else
       data.pot1 = constrain(pwm, 0, 255);
+
+    data.btn1 = boostState;
+    data.btn2 = stopState;
 
     Serial.printf("P1=%d, B1=%d, B2=%d\n", data.pot1, data.btn1, data.btn2);
   }
