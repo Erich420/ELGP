@@ -23,8 +23,8 @@
 #define KEYPAD_ROWS 4
 #define KEYPAD_COLS 3
 
-uint8_t rowPins[KEYPAD_ROWS] = {5, 17, 16, 7};
-uint8_t colPins[KEYPAD_COLS] = {6, 4, 15};
+uint8_t rowPins[KEYPAD_ROWS] = {16, 4, 5, 7};
+uint8_t colPins[KEYPAD_COLS] = {15, 17, 6};
 
 uint8_t keymap[KEYPAD_ROWS][KEYPAD_COLS] =
 {
@@ -204,7 +204,7 @@ void mergeSlaveInputs()
 
             // Slave 1: axes X, Y, Z (axis positions 0, 1, 2)
             axis[0] = slaves[i].data.axis[0];
-            axis[1] = slaves[i].data.axis[1];
+            axis[3] = slaves[i].data.axis[1];
             axis[2] = slaves[i].data.axis[2];
         }
         else if(slaveID == 2)
@@ -213,7 +213,7 @@ void mergeSlaveInputs()
             buttons |= ((slaves[i].data.buttons & 0x7F) << 6);
 
             // Slave 2: axes RZ, RX, RY (axis positions 3, 4, 5)
-            axis[3] = slaves[i].data.axis[0];
+            axis[1] = slaves[i].data.axis[0];
             axis[4] = slaves[i].data.axis[1];
             axis[5] = slaves[i].data.axis[2];
         }
