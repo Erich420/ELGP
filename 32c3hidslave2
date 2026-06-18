@@ -1,0 +1,386 @@
+#include <Arduino.h>
+#include <U8g2lib.h>
+#include <Wire.h>
+
+#define SDA_PIN 5
+#define SCL_PIN 6
+U8G2_SSD1306_72X40_ER_F_HW_I2C u8g2(U8G2_R0, /* reset=*/U8X8_PIN_NONE);
+
+// ───────────────────────────────
+// ⚙️ CONFIGURATION
+// ───────────────────────────────
+#define POT1_PIN 4 // THROTTLE
+#define POT2_PIN 1 // STEERING
+#define BTN1_PIN 3 
+#define BTN2_PIN 0 
+#define AVG_COUNT 10
+#define SEND_INTERVAL 20
+
+
+
+// ───────────────────────────────
+// 📈 Averaging Buffers
+// ───────────────────────────────
+float buffer1[AVG_COUNT];
+float buffer2[AVG_COUNT];
+int index1 = 0, index2 = 0;
+bool filled1 = false, filled2 = false;
+
+// ───────────────────────────────
+// 🧠 Calibration storage
+// ───────────────────────────────
+
+int pot1Min = 0, pot1Max = 4095;
+int pot2Min = 0, pot2Max = 4095;
+int v1;
+int v2;
+unsigned long cstart = 0;
+
+// ───────────────────────────────
+// 🕐 Timers & variables
+// ───────────────────────────────
+unsigned long lastSend = 0;
+unsigned long ldisplay = 0;
+unsigned long buttonPressStart = 0;
+//bool calibrating = true;
+bool boostState = false;
+bool stopState = false;
+bool started = false;
+bool center = true;
+//int center1;
+//int center2;
+
+// ───────────────────────────────
+// 🧩 ICONS
+// ───────────────────────────────
+const uint8_t boost_icon[8] = {
+  0b00011000,
+  0b00111100,
+  0b01111110,
+  0b11111111,
+  0b00111100,
+  0b00111100,
+  0b00111100,
+  0b00000000
+};
+const uint8_t stop_icon[8] = {
+  0b00000000,
+  0b01111110,
+  0b01111110,
+  0b01111110,
+  0b01111110,
+  0b01111110,
+  0b00000000,
+  0b00000000
+};
+
+// ───────────────────────────────
+// 🔧 Helpers
+// ───────────────────────────────
+float runningAverage(float *buffer, int &index, bool &filled, float newValue) {
+  buffer[index] = newValue;
+  index = (index + 1) % AVG_COUNT;
+  if (index == 0)
+    filled = true;
+  int count = filled ? AVG_COUNT : index;
+  float sum = 0;
+  for (int i = 0; i < count; i++)
+    sum += buffer[i];
+  return sum / count;
+}
+
+int mapTo255(int value, int in_min, int in_max) {
+  int mapped = map(value, in_min, in_max, 0, 255);
+  return constrain(mapped, 0, 255);
+}
+
+int mapTo100(int value, int in_min, int in_max) {
+  int mapped = map(value, in_min, in_max, 0, 100);
+  return constrain(mapped, 0, 100);
+}
+/*int mapTo(int value, int in_min, int in_max) {
+  int mapped = map(value, in_min, in_max, -127, 127);
+  return constrain(mapped, -127, 127);
+}*/
+// ───────────────────────────────
+// 💾 Calibration
+// ───────────────────────────────
+void loadCalibration() {
+  prefs.begin("calib", true);
+  pot1Min = prefs.getInt("p1min", 0);
+  pot1Max = prefs.getInt("p1max", 4095);
+ // pot2Min = prefs.getInt("p2min", 0);
+ // pot2Max = prefs.getInt("p2max", 4095);
+  prefs.end();
+  v1 = analogRead(POT1_PIN);
+int var= abs(v1-pot1Min);
+
+
+
+  Serial.printf("Loaded calibration: P1[%d-%d]\n", pot1Min, pot1Max);
+}
+
+void saveCalibration() {
+  prefs.begin("calib", false);
+  prefs.putInt("p1min", pot1Min);
+  prefs.putInt("p1max", pot1Max);
+ // prefs.putInt("p2min", pot2Min);
+//  prefs.putInt("p2max", pot2Max);
+  prefs.end();
+  Serial.println("Calibration saved.");
+}
+
+void doCalibration() {
+ // Serial.println("Calibration mode: ");
+             Serial.print ("MOVE THROTTLE TO MAX / 100 %\n");
+     Serial.print ("TAP STOP (DONT HOLD IT IN!)\n");
+
+  pot1Min = 4095;
+  pot1Max = 0;
+ // pot2Min = 4095;
+ // pot2Max = 0;
+ 
+  cstart = millis();
+ // center = false;
+  started = true;
+  int buttonState = 0;
+  int lastButtonState = 0;
+  int counter = 0;
+  while (started) {
+  
+   // pot1Max = max(pot1Max, v1);
+   // pot2Min = min(pot2Min, v2);
+  //  pot2Max = max(pot2Max, v2);
+   // center1 = (pot1Min + pot1Max) / 2;
+   // center2 = (pot2Min + pot2Max) / 2;
+    buttonState = digitalRead(BTN1_PIN);
+    if ((millis() - cstart) > 250) {
+      if (buttonState != lastButtonState) {
+        cstart = millis();
+        if (buttonState == LOW) {
+          counter++;
+          if (counter > 3) counter = 3;
+          if (counter == 1) {
+   v1 = analogRead(POT1_PIN);
+          pot1Max = max(pot1Max, v1);
+          Serial.printf("P1=%d, MAX=%d\n", v1, pot1Max);
+       //     Serial.printf("P2=%d, MIN=%d, MAX=%d\n", v2, pot2Min, pot2Max);
+           //    Serial.printf("Move pots through full range btn1 to validate");
+    Serial.print ("MOVE THROTTLE TO MIN / 0 %\n");
+     Serial.print ("TAP STOP (DONT HOLD IT IN!)\n");
+          }
+          if (counter == 2) {
+        //   Serial.printf("Move Pots to center press btn1 to validate");
+        
+              v1 = analogRead(POT1_PIN);
+   // v2 = analogRead(POT2_PIN);
+             pot1Min = min(pot1Min, v1);
+
+            Serial.printf("P1=%d, MIN=%d\n", v1, pot1Min);
+        
+/// Serial.print ("MOVE THROTTLE TO MIN / 0 %\n");
+     Serial.print ("TAP STOP TO VALIDATE\n");
+         }
+        if (counter == 3) {
+        //   Serial.printf("Move Pots to center press btn1 to validate");
+          started = false;
+
+         }
+        }
+      }
+      lastButtonState = buttonState;
+      
+    }
+    doScreen(); // show calibration info live
+  }
+ // Serial.println("\nCalibration complete!");
+  saveCalibration();
+  calibrating = false;
+}
+
+// ───────────────────────────────
+// 🚀 Setup
+// ───────────────────────────────
+void setup() {
+  
+  // Init Wi-Fi
+ /* WiFi.mode(WIFI_STA);
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("ESP-NOW init failed!");
+    while (true) delay(100);
+  }
+  // Register peer (host ESP32)
+  esp_now_peer_info_t peerInfo{};
+  memcpy(peerInfo.peer_addr, hostMac, 6);
+  peerInfo.channel = 0;
+  peerInfo.encrypt = false;
+  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+    Serial.println("Failed to add peer");
+    while (true) delay(100);
+  }
+  esp_now_register_send_cb(onSent);*/
+  Serial.begin(115200);
+  Wire.begin(SDA_PIN, SCL_PIN);
+  u8g2.begin();
+  pinMode(BTN1_PIN, INPUT_PULLUP);
+  pinMode(BTN2_PIN, INPUT_PULLUP);
+  analogReadResolution(12);
+  loadCalibration();
+  Serial.println("Sender started");
+}
+
+// ───────────────────────────────
+// 🔁 Loop
+// ───────────────────────────────
+void loop() {
+  // ── Handle calibration button (3 s hold)
+ // buttonPressStart = millis();
+ if (millis() <= 3000){
+
+ doCalibration();
+
+
+
+ }
+
+  unsigned long now = millis();
+  if (now - lastSend >= SEND_INTERVAL && !calibrating) {
+    lastSend = now;
+    if (digitalRead(BTN1_PIN) == LOW) {
+     // data.bo = boostState;
+      boostState = true;
+    } else {
+     // data.bo = boostState;
+      boostState = false;
+    }
+    if (digitalRead(BTN2_PIN) == LOW) {
+     // data.btn2 = 1;
+      stopState = true;
+        //  data.mo = 1;  //fw &rev pin low
+     } else {
+   //  data.mo = 2;
+      stopState = false;
+   //   buttonPressStart = 0;
+    }
+    int raw1 = analogRead(POT1_PIN);
+   // int raw2 = analogRead(POT2_PIN);
+    float avg1 = runningAverage(buffer1, index1, filled1, raw1);
+   // float avg2 = runningAverage(buffer2, index2, filled2, raw2);
+    int pwm =mapTo255((int)avg1, pot1Min, pot1Max);
+   // data.pot1= 
+    if((pwm < 25) || (stopState==true))
+     pwm =0;
+
+    if (!boostState)
+      data.pot1 = constrain( pwm,0,200);
+    else
+       data.pot1 = constrain( pwm,0,255);
+
+  //  data.pot2 = mapTo127((int)avg2, pot2Min, pot2Max);
+    Serial.printf("P1=%d, B1=%d, B2=%d\n", data.pot1, data.btn1, data.btn2);
+  }
+
+  if (now - ldisplay >= 200 && !calibrating) {
+    ldisplay = now;
+    doScreen();
+  }
+}
+// ───────────────────────────────
+// 🖥️ OLED Display (F1-Style Throttle + Steering)
+// ───────────────────────────────
+// ────────────────// ───────────────────────────────
+// 🖥️ OLED Display (Dual Split Bars)
+// POT1 = Throttle (Forward/Reverse)
+// POT2 = Steering (Left/Right)
+// ───────────────────────────────
+// ───────────────────────────────
+// 🖥️ OLED Display (Dual Split Bars)
+// POT1 = Throttle (Forward/Reverse)
+// POT2 = Steering (Left/Right)
+// ───────────────────────────────
+void doScreen(void) {
+  u8g2.clearBuffer();
+
+  if (!calibrating) {
+    // ───── MAIN PAGE ─────
+    u8g2.setFont(u8g2_font_6x10_tr);
+   // u8g2.drawStr(0, 10, "F1 DASH");
+
+    // ── BOOST ICON ──
+    u8g2.drawXBMP(0, 5, 8, 8, boost_icon);
+    u8g2.drawStr(55, 10, "DRS");
+    u8g2.drawStr(55, 20, boostState ? "ON" : "OFF");
+
+    int centerX = 36; // screen center (72px wide)
+    int centerY = 20; 
+    // ─────────────────────
+    // ⚙️ POT1 THROTTLE BAR
+    // ─────────────────────
+    int rawThrottle = analogRead(POT1_PIN);
+    int mappedThrottle = map(rawThrottle, pot1Min, pot1Max, 0, 255);
+    mappedThrottle = constrain(mappedThrottle, 0, 255);
+
+    int barLength1 = map(abs(mappedThrottle), 0, 255, 0, 36);
+    u8g2.drawLine(30, 38, 42, 38);
+
+      u8g2.drawBox(32, 38-barLength1, 10, barLength1); // reverse
+  
+    // Direction text
+    u8g2.setFont(u8g2_font_5x7_tr);
+    //u8g2.drawStr(0, 28, "REV");
+   // u8g2.drawStr(55, 28, "FWD");
+
+    // LPWM/RPWM calculation
+   // int lpwm = 0, rpwm = 0;
+
+
+   // if (mappedThrottle < 0) {
+    //  lpwm = abs(mappedThrottle);
+    //  rpwm = 0;
+   // } else if (mappedThrottle > 0) {
+     // rpwm = abs(mappedThrottle);
+    //  lpwm = 0;
+  ////  }
+   // char pwmBuf[20];
+   // sprintf(pwmBuf, "L:%3d R:%3d", lpwm, rpwm);
+   // u8g2.drawStr(0, 52, pwmBuf);
+
+    // ─────────────────────
+    // 🏎️ POT2 STEERING BAR
+    // ─────────────────────
+  //  int rawSteer = analogRead(POT2_PIN);
+   // int mappedSteer = map(rawSteer, pot2Min, pot2Max, -255, 255);
+   // mappedSteer = constrain(mappedSteer, -255, 255);
+
+   // int barLength2 = map(abs(mappedSteer), 0, 255, 0, 30);
+   // u8g2.drawVLine(centerX, 36, 7); // center marker
+
+  //  if (mappedSteer < 0)
+    //  u8g2.drawBox(centerX - barLength2, 37, barLength2, 6); // left
+  //  else if (mappedSteer > 0)
+    //  u8g2.drawBox(centerX + 1, 37, barLength2, 6); // right
+
+
+    // Debug readout
+   // char steerBuf[16];
+   // sprintf(steerBuf, "S:%3d", mappedSteer);
+   // u8g2.drawStr(50, 52, steerBuf);
+
+    // ── HOLD MESSAGE ──
+  //  if (stopState && (millis() - buttonPressStart > 1000))
+    //  u8g2.drawStr(35, 10, "Hold STOP to Cal");
+
+  } else {
+    // ───── CALIBRATION PAGE ─────
+    u8g2.setFont(u8g2_font_6x10_tr);
+    u8g2.drawStr(0, 10, "CALIBRATION");
+    char buf[30];
+    sprintf(buf, "P1: %d-%d", pot1Min, pot1Max);
+    u8g2.drawStr(0, 25, buf);
+  //  sprintf(buf, "P2: %d-%d", pot2Min, pot2Max);
+   // u8g2.drawStr(0, 35, buf);
+  // u8g2.drawStr(0, 50, "Move pots to full range");
+  }
+
+  u8g2.sendBuffer();
+}
