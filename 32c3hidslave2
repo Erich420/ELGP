@@ -1,7 +1,6 @@
 #include <Arduino.h>
 #include <U8g2lib.h>
 #include <Wire.h>
-#include <Preferences.h>
 
 #define SDA_PIN 5
 #define SCL_PIN 6
@@ -25,8 +24,6 @@ struct ControlData {
   int btn1;
   int btn2;
 } data;
-
-Preferences prefs;
 
 // ───────────────────────────────
 // 📈 Averaging Buffers
@@ -107,28 +104,6 @@ int mapTo100(int value, int in_min, int in_max) {
 }
 
 // ───────────────────────────────
-// 💾 Calibration
-// ───────────────────────────────
-void loadCalibration() {
-  prefs.begin("calib", true);
-  pot1Min = prefs.getInt("p1min", 0);
-  pot1Max = prefs.getInt("p1max", 4095);
-  prefs.end();
-  v1 = analogRead(POT1_PIN);
-  int var = abs(v1 - pot1Min);
-
-  Serial.printf("Loaded calibration: P1[%d-%d]\n", pot1Min, pot1Max);
-}
-
-void saveCalibration() {
-  prefs.begin("calib", false);
-  prefs.putInt("p1min", pot1Min);
-  prefs.putInt("p1max", pot1Max);
-  prefs.end();
-  Serial.println("Calibration saved.");
-}
-
-// ───────────────────────────────
 // 🚀 Setup
 // ───────────────────────────────
 void setup() {
@@ -138,7 +113,6 @@ void setup() {
   pinMode(BTN1_PIN, INPUT_PULLUP);
   pinMode(BTN2_PIN, INPUT_PULLUP);
   analogReadResolution(12);
-  loadCalibration();
   Serial.println("Sender started");
 }
 
@@ -199,7 +173,7 @@ void doScreen(void) {
 
   u8g2.setFont(u8g2_font_6x10_tr);
 
-  // ── BOOST ICON ──
+  // ���─ BOOST ICON ──
   u8g2.drawXBMP(0, 5, 8, 8, boost_icon);
   u8g2.drawStr(55, 10, "DRS");
   u8g2.drawStr(55, 20, boostState ? "ON" : "OFF");
