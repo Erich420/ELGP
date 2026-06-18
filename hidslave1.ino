@@ -15,14 +15,14 @@
 // GPIO PINS
 //================================================
 
-#define D0 19
-#define D1 33
-#define D2 18
-#define D3 25
+#define D0 26
+#define D1 25
+#define D2 27
+#define D3 14
 
 // Mode buttons
-#define MODE_BTN_1 5  // First mode button
-#define MODE_BTN_2 26  // Second mode button
+#define MODE_BTN_1 18  // First mode button
+#define MODE_BTN_2 19  // Second mode button
 
 // Analog axis pins (Potentiometers)
 #define AXIS_Y_PIN 36  // Y axis potentiometer (Left Trigger)
